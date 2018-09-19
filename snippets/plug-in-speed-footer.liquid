@@ -1,0 +1,100 @@
+{% comment %}
+  ----------------------------------------------------------------------------------
+   Plug in Speed for Shopify
+
+   Copyright (c) 2017 Pemberton Rank Ltd, a company registered in England 7341337
+
+   This file is subject to the license at https://www.pluginspeed.com/eula
+  ----------------------------------------------------------------------------------
+{% endcomment %}
+
+{% if invalidateMinifiedAssetCache == true %}
+  <script async src="https://api.pluginspeed.com/users/{{ licensedTo }}/minified-asset-cache/invalidate"></script>
+{% endif %}
+
+--- Separation of responsibilities ---
+
+-- DATA --
+- Shopify theme files
+  - maintains exact state of the install: we do not store this in our Plug in Speed DB
+- Plug in Speed DB
+  - the user's preference if a feature should be off/on, but not its exact state
+
+- Code
+  - Check if theme code installed / up-to-date
+    - If so, display settings:
+      - JavaScript [on|off] default on
+        - on - all tags substituted for our include
+        - on - some tags not substituted [found some scripts to optimise: OPTIMISE button]
+        - off - none of our script includes
+        - off - some of our script includes [REMOVE OPTIMISATIONS button]
+        - switching from off -> on substitute all scripts
+        - switching from on -> off remove all includes
+      - CSS [on|off] default on
+      - HTML [on|off] default off
+    - If not, display install / upgrade button with other options greyed out
+
+- plug-in-speed-minify
+  - decide if cache should be invalidated
+  - render HTML of script / style element
+  - see if the minified asset exists in the theme
+- plug-in-speed
+  - switching features on/off
+  - global variables
+  - global version number
+- plug-in-speed-footer
+  - make invalidate cache call
+
+- invalidate cache API
+  - if user has an active charge
+    - minify assets
+    - set metafield indicating cache is valid
+  - else
+    - return 200
+
+- user views Plug in Speed minification setting
+  - determine if the includes are installed in the theme and up-to-date
+  - determine if there are assets in theme.liquid that can be minified
+
+- user chooses to install theme code
+  - add snippets to theme
+
+- user chooses to upgrade theme code
+  - upgrade all theme snippets
+
+- user chooses to minify assets
+  - substitute asset_urls and includes in theme.liquid with our plug-in-speed-minify include
+
+* rename HTML minifier snippet to plug-in-speed-html-minify, write a migration *
+* what to do about the HTML minifier? asked Anton if it has ever sped up a customer's shop *
+
+1. obtain lock (maybe http://thelazylog.com/understanding-locking-in-rails-activerecord/)
+  - if can't obtain lock, return HTTP 200
+2. do minify
+  - HTTP request homepage
+  - for each element with the data-pluginspeed-minifier attribute
+    - HTTP request the href / src
+    - save minified result to theme
+      - prefix with plug-in-speed.min. and save to /assets, save to /snippets (with .liquid for snippets)
+  - end
+  - HTTP request homepage
+  - for each element with the data-pluginspeed-minifier attribute
+    - create/update shop metafield with the name plug-in-speed.[asset], replacing '.' in asset with '-', using the data-asset and data-key attributes, like...
+      - <link href="bla" data-pluginspeed-minifier data-asset="theme.scss.css" data-key="2895143093070690606" />
+      - shop.metafields.plug-in-speed.theme-scss-css = 2895143093070690606
+  - end
+3. HTTP request homepage again to sanity check no remaining data-pluginspeed-minifier: which would mean page updated in the meantime
+    - if any, repeat 2 again a maximum of 5 times and then email help@pluginseo.com for us to investigate
+4. always release lock: regardless of exceptions
+  - check that the lock will timeout if not released after X minutes or something
+5. return HTTP 200
+
+
+- note:
+  - there is a risk that the asset has changed during the time we've requested it, minified and completed the process
+  - however that is much better than competitors (manual minification with broken Liquid)
+  - we can also add a simple button in Plug in Speed that makes a request to https://api.pluginspeed.com/users/{{ licensedTo }}/minified-asset-cache/invalidate
+
+- support only usage inside theme.liquid
+  - why?
+    - could create infinite loop (neverending minifications) if minifier in different places due to iteration over data-pluginspeed-minifier elements
